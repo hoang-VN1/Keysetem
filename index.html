@@ -484,11 +484,6 @@
                 return;
             }
             
-            if (!isValidKey(key)) {
-                showToast('⚠️ Key không khớp với thiết bị này!', false);
-                return;
-            }
-            
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(key).then(() => {
                     showToast('✅ Đã sao chép: ' + key);
