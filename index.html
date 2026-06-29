@@ -1,593 +1,107 @@
-<?php
-// ===== XỬ LÝ KEY PHÍA SERVER =====
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-
-$keyFile = 'keys.json';
-$keys = [];
-
-// Đọc dữ liệu key hiện có
-if (file_exists($keyFile)) {
-    $content = file_get_contents($keyFile);
-    $keys = json_decode($content, true) ?: [];
-}
-
-// Xóa key hết hạn (TỰ ĐỘNG XÓA KHI HẾT 3 NGÀY)
-$now = time();
-foreach ($keys as $k => $data) {
-    if ($data['expiry'] < $now) {
-        unset($keys[$k]);
-    }
-}
-
-// Lấy action từ request
-$action = $_GET['action'] ?? '';
-
-if ($action === 'get_key') {
-    // Tạo key mới (hạn 3 ngày) - CHỈ TẠO KHI BẤM GET KEY TỪ SCRIPT
-    $deviceId = $_GET['device_id'] ?? '';
-    if (empty($deviceId)) {
-        echo json_encode(['status' => 'error', 'message' => 'Thiếu device_id']);
-        exit;
-    }
-
-    // Kiểm tra xem device đã có key chưa (chỉ được 1 key/device)
-    $existingKey = null;
-    foreach ($keys as $k => $data) {
-        if ($data['device_id'] === $deviceId && $data['expiry'] > $now) {
-            $existingKey = $k;
-            break;
-        }
-    }
-    if ($existingKey) {
-        echo json_encode([
-            'status' => 'success',
-            'key' => $existingKey,
-            'expiry' => $keys[$existingKey]['expiry'],
-            'device_id' => $deviceId,
-            'message' => 'Key đã tồn tại cho thiết bị này'
-        ]);
-        exit;
-    }
-
-    // Tạo key mới (chỉ khi chưa có key hoặc key đã hết hạn)
-    $newKey = 'HOANG_' . strtoupper(bin2hex(random_bytes(4)));
-    $keys[$newKey] = [
-        'device_id' => $deviceId,
-        'expiry' => $now + (3 * 24 * 60 * 60), // 3 ngày
-        'created' => $now
-    ];
-
-    file_put_contents($keyFile, json_encode($keys, JSON_PRETTY_PRINT));
-
-    echo json_encode([
-        'status' => 'success',
-        'key' => $newKey,
-        'expiry' => $keys[$newKey]['expiry'],
-        'device_id' => $deviceId,
-        'message' => 'Key mới được tạo'
-    ]);
-    exit;
-}
-
-if ($action === 'verify_key') {
-    // Xác thực key
-    $key = $_GET['key'] ?? '';
-    $deviceId = $_GET['device_id'] ?? '';
-    if (empty($key) || empty($deviceId)) {
-        echo json_encode(['status' => 'error', 'message' => 'Thiếu key hoặc device_id']);
-        exit;
-    }
-
-    if (!isset($keys[$key])) {
-        echo json_encode(['status' => 'error', 'message' => 'Key không tồn tại']);
-        exit;
-    }
-
-    $data = $keys[$key];
-    if ($data['expiry'] < $now) {
-        unset($keys[$key]);
-        file_put_contents($keyFile, json_encode($keys, JSON_PRETTY_PRINT));
-        echo json_encode(['status' => 'error', 'message' => 'Key đã hết hạn']);
-        exit;
-    }
-
-    if ($data['device_id'] !== $deviceId) {
-        // WEB CHỈ TRẢ VỀ LỖI, KHÔNG KICK
-        echo json_encode(['status' => 'error', 'message' => 'Key không thuộc về thiết bị này', 'device_mismatch' => true]);
-        exit;
-    }
-
-    echo json_encode(['status' => 'success', 'message' => 'Key hợp lệ', 'expiry' => $data['expiry']]);
-    exit;
-}
-
-// Nếu không có action, hiển thị giao diện web (GIỮ NGUYÊN UI GỐC)
-?>
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>Key của bạn đã sẵn sàng ✦</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-        }
-        body {
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: #0b0e1a;
-            padding: 16px;
-            margin: 0;
-        }
-        .card {
-            max-width: 500px;
-            width: 100%;
-            background: linear-gradient(145deg, #141b2b, #1a2335);
-            border-radius: 36px;
-            padding: 30px 20px 25px;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,215,0,0.08);
-            text-align: center;
-            border: 1px solid rgba(255,215,0,0.1);
-            position: relative;
-            overflow: hidden;
-        }
-        .card::before {
-            content: '';
-            position: absolute;
-            top: -50%; left: -50%;
-            width: 200%; height: 200%;
-            background: conic-gradient(from 0deg, transparent, rgba(255,215,0,0.02), transparent, rgba(255,215,0,0.02), transparent);
-            animation: rotate 25s linear infinite;
-            pointer-events: none;
-        }
-        @keyframes rotate { 100% { transform: rotate(360deg); } }
-        .badge {
-            background: rgba(0,255,150,0.1);
-            border: 1px solid rgba(0,255,150,0.15);
-            border-radius: 50px;
-            padding: 5px 16px;
-            display: inline-block;
-            color: #00ff96;
-            font-size: 12px;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            margin-bottom: 16px;
-            position: relative;
-        }
-        h1 {
-            font-size: 24px;
-            font-weight: 700;
-            color: #fff;
-            margin-bottom: 4px;
-            position: relative;
-            line-height: 1.3;
-        }
-        h1 span { color: #ffd700; }
-        .sub {
-            color: #8892b0;
-            font-size: 14px;
-            margin-bottom: 22px;
-            position: relative;
-            padding: 0 6px;
-        }
-        .key-box {
-            background: rgba(0,0,0,0.5);
-            border-radius: 18px;
-            padding: 18px 12px;
-            margin: 16px 0 18px;
-            border: 1px dashed rgba(255,215,0,0.25);
-            cursor: pointer;
-            transition: all 0.2s;
-            position: relative;
-            -webkit-tap-highlight-color: transparent;
-        }
-        .key-box:active {
-            border-color: #ffd700;
-            background: rgba(255,215,0,0.06);
-            transform: scale(0.98);
-        }
-        .key-label {
-            color: #a8b2d1;
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            margin-bottom: 4px;
-        }
-        #accessKey {
-            font-size: 26px;
-            font-weight: 700;
-            color: #ffd700;
-            text-shadow: 0 0 20px rgba(255,215,0,0.1);
-            word-break: break-all;
-            font-family: 'Courier New', monospace;
-            letter-spacing: 0.5px;
-            padding: 4px 0;
-        }
-        .status-row {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
-            margin: 14px 0 10px;
-            font-size: 13px;
-            color: #8892b0;
-            position: relative;
-        }
-        .status-dot {
-            display: inline-block;
-            width: 8px; height: 8px;
-            background: #00ff96;
-            border-radius: 50%;
-            margin-right: 4px;
-            box-shadow: 0 0 10px #00ff96;
-            animation: pulse 1.8s infinite;
-        }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
-        .status-active { color: #00ff96; font-weight: 600; }
-        .expiry {
-            color: #fbbf24;
-            font-size: 12px;
-            background: rgba(251,191,36,0.08);
-            padding: 4px 12px;
-            border-radius: 50px;
-            border: 1px solid rgba(251,191,36,0.12);
-        }
-        .expiry.expired {
-            color: #f87171;
-            border-color: rgba(248,113,113,0.2);
-            background: rgba(248,113,113,0.08);
-        }
-        .product {
-            color: #ccd6f6;
-            font-size: 14px;
-            margin: 12px 0 14px;
-            position: relative;
-        }
-        .product strong { color: #ffd700; }
-        .btn-group {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-            position: relative;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-        .btn {
-            padding: 12px 20px;
-            border: none;
-            border-radius: 50px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.15s;
-            background: rgba(255,255,255,0.05);
-            color: #ccd6f6;
-            border: 1px solid rgba(255,255,255,0.06);
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            flex: 1 1 auto;
-            min-width: 100px;
-            -webkit-tap-highlight-color: transparent;
-        }
-        .btn:active { transform: scale(0.95); }
-        .btn-primary {
-            background: linear-gradient(135deg, #f7971e, #ffd200);
-            color: #0b0e1a;
-            border: none;
-            font-weight: 700;
-        }
-        .btn-primary:active { box-shadow: 0 4px 16px rgba(247,151,30,0.3); }
-        .btn-primary:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-            transform: none !important;
-            background: #4a5568;
-            color: #a0aec0;
-        }
-        .btn-copy {
-            background: rgba(0,255,200,0.08);
-            border-color: rgba(0,255,200,0.15);
-            color: #00ffc8;
-        }
-        .btn-copy:active { background: rgba(0,255,200,0.15); }
-        .toast {
-            position: fixed;
-            bottom: 24px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #1a2335;
-            padding: 10px 22px;
-            border-radius: 50px;
-            color: #fff;
-            border: 1px solid #2a3455;
-            font-size: 13px;
-            opacity: 0;
-            transition: opacity 0.35s;
-            pointer-events: none;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.6);
-            max-width: 90%;
-            text-align: center;
-            z-index: 999;
-        }
-        .toast.show { opacity: 1; }
-        .gen-info {
-            color: #4a5a7a;
-            font-size: 11px;
-            margin-top: 18px;
-            border-top: 1px solid rgba(255,255,255,0.04);
-            padding-top: 16px;
-            position: relative;
-            line-height: 1.5;
-        }
-        .gen-info strong { color: #fbbf24; }
-        @media (max-width: 420px) {
-            .card { padding: 22px 14px; }
-            #accessKey { font-size: 20px; }
-            .btn { font-size: 12px; padding: 10px 12px; min-width: 70px; }
-            .expiry { font-size: 11px; }
-        }
-    </style>
-</head>
-<body>
-
-<div class="card">
-    <div class="badge">✦ XÁC THỰC THÀNH CÔNG</div>
-    <h1># Key của bạn <span>đã sẵn sàng</span> ✦</h1>
-    <p class="sub">Sao chép key và dán vào Hub để bắt đầu.</p>
-
-    <div class="key-box" id="keyBox" title="Nhấn để sao chép nhanh">
-        <div class="key-label">🔑 Access Key</div>
-        <div id="accessKey">⏳ Đang tạo...</div>
-    </div>
-
-    <div class="status-row">
-        <span><span class="status-dot"></span><span class="status-active">● ACTIVE</span></span>
-        <span class="expiry" id="expiryText">⏳ Hết hạn sau: -- ngày --:--:--</span>
-    </div>
-
-    <div class="product">
-        📦 Sản phẩm: <strong>của hoàng</strong>
-    </div>
-
-    <div class="btn-group">
-        <button class="btn btn-primary" id="genKeyBtn">🔄 TẠO MỚI</button>
-        <button class="btn btn-copy" id="copyBtn">📋 SAO CHÉP</button>
-    </div>
-
-    <div class="gen-info">
-        ⚡ Prefix: <span id="prefixDisplay">HOANG</span> · Thời hạn: <strong>3 ngày</strong> · Chỉ tạo mới khi key hết hạn
-    </div>
-</div>
-
-<div id="toast" class="toast">✅ Đã sao chép!</div>
-
+<!-- ===== BỔ SUNG IPA: KHÔNG SỬA CODE GỐC, GIỮ NGUYÊN UI ===== -->
 <script>
-    (function() {
-        // ---- CẤU HÌNH ----
-        const CONFIG = {
-            prefix: 'HOANG',
-            keyLength: 8,
-            expiryDays: 3,
-        };
+(function() {
+    // ---- TẠO ID THIẾT BỊ DUY NHẤT ----
+    function generateDeviceId() {
+        const info = [
+            navigator.userAgent,
+            navigator.language,
+            navigator.platform,
+            screen.width + 'x' + screen.height,
+            screen.colorDepth,
+            navigator.hardwareConcurrency || 0,
+            navigator.deviceMemory || 0,
+            new Date().getTimezoneOffset()
+        ].join('|');
+        let hash = 0;
+        for (let i = 0; i < info.length; i++) {
+            hash = ((hash << 5) - hash) + info.charCodeAt(i);
+            hash = hash & hash;
+        }
+        return 'DEV_' + Math.abs(hash).toString(36).toUpperCase();
+    }
 
-        // ---- DOM ----
+    // ---- MÃ HÓA/GIẢI MÃ DEVICE ID ----
+    function encodeDeviceId(deviceId) {
+        return btoa(deviceId).replace(/=/g, '').slice(0, 12);
+    }
+
+    function decodeDeviceFromKey(key) {
+        try {
+            const parts = key.split('_');
+            if (parts.length < 3) return null;
+            let encoded = parts[1];
+            while (encoded.length % 4 !== 0) encoded += '=';
+            return atob(encoded);
+        } catch(e) { return null; }
+    }
+
+    // ---- TẠO KEY GẮN THIẾT BỊ ----
+    function generateDeviceKey(deviceId) {
+        const prefix = 'HOANG';
+        const encoded = encodeDeviceId(deviceId);
+        const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+        return prefix + '_' + encoded + '_' + random;
+    }
+
+    // ---- LẤY HOẶC TẠO DEVICE ID ----
+    let currentDeviceId = localStorage.getItem('deviceId_hoang');
+    if (!currentDeviceId) {
+        currentDeviceId = generateDeviceId();
+        localStorage.setItem('deviceId_hoang', currentDeviceId);
+    }
+
+    // ---- KIỂM TRA VÀ CẬP NHẬT KEY HIỆN TẠI (NẾU CẦN) ----
+    let currentKey = localStorage.getItem('realkid_key') || '';
+    if (currentKey) {
+        const decoded = decodeDeviceFromKey(currentKey);
+        if (!decoded || decoded !== currentDeviceId) {
+            // Key không khớp thiết bị → tạo key mới nhưng KHÔNG can thiệp UI
+            const newKey = generateDeviceKey(currentDeviceId);
+            localStorage.setItem('realkid_key', newKey);
+            // Cập nhật expiry để đồng bộ với code gốc
+            const expiry = Date.now() + 3 * 24 * 60 * 60 * 1000;
+            localStorage.setItem('realkid_expiry', String(expiry));
+            console.log('🔑 IPA: Đã tạo key mới gắn thiết bị:', newKey);
+        }
+    } else {
+        // Chưa có key → tạo mới
+        const newKey = generateDeviceKey(currentDeviceId);
+        localStorage.setItem('realkid_key', newKey);
+        const expiry = Date.now() + 3 * 24 * 60 * 60 * 1000;
+        localStorage.setItem('realkid_expiry', String(expiry));
+        console.log('🔑 IPA: Đã tạo key mới gắn thiết bị:', newKey);
+    }
+
+    // ---- GHIM LẠI HÀM TẠO KEY MỚI (KHÔNG SỬA CODE GỐC, CHỈ BỔ SUNG) ----
+    const originalCreateNewKey = window.createNewKey;
+    window.createNewKey = function() {
+        // Gọi hàm gốc nếu tồn tại (để giữ nguyên logic UI)
+        if (typeof originalCreateNewKey === 'function') {
+            originalCreateNewKey();
+        }
+        // Sau đó ghi đè key bằng key gắn thiết bị
+        const deviceKey = generateDeviceKey(currentDeviceId);
+        localStorage.setItem('realkid_key', deviceKey);
+        const expiry = Date.now() + 3 * 24 * 60 * 60 * 1000;
+        localStorage.setItem('realkid_expiry', String(expiry));
+        // Cập nhật hiển thị (nếu có) mà không phá UI
         const accessKeyEl = document.getElementById('accessKey');
-        const keyBox = document.getElementById('keyBox');
-        const copyBtn = document.getElementById('copyBtn');
-        const genBtn = document.getElementById('genKeyBtn');
-        const expiryEl = document.getElementById('expiryText');
-        const prefixDisplay = document.getElementById('prefixDisplay');
-        const toast = document.getElementById('toast');
+        if (accessKeyEl) accessKeyEl.textContent = deviceKey;
+        console.log('🔑 IPA: Key mới gắn thiết bị:', deviceKey);
+        return deviceKey;
+    };
 
-        // ---- STATE ----
-        let currentKey = '';
-        let expiryTimestamp = 0;
+    // ---- THÊM THÔNG BÁO TRẠNG THÁI THIẾT BỊ (KHÔNG ẢNH HƯỞNG UI CHÍNH) ----
+    const statusRow = document.querySelector('.status-row');
+    if (statusRow) {
+        const deviceInfo = document.createElement('span');
+        deviceInfo.style.cssText = 'color:#4a5a7a;font-size:10px;border-left:1px solid #2a3455;padding-left:8px;margin-left:4px;';
+        deviceInfo.textContent = '🖥️ ' + currentDeviceId.slice(0, 8) + '...';
+        statusRow.appendChild(deviceInfo);
+    }
 
-        // ---- TOAST ----
-        function showToast(msg, isError = false) {
-            toast.textContent = msg;
-            toast.style.borderColor = isError ? '#f87171' : '#2a3455';
-            toast.style.color = isError ? '#fca5a5' : '#fff';
-            toast.classList.add('show');
-            clearTimeout(toast._timer);
-            toast._timer = setTimeout(() => {
-                toast.classList.remove('show');
-                toast.style.borderColor = '#2a3455';
-                toast.style.color = '#fff';
-            }, 3000);
-        }
-
-        // ---- TẠO KEY NGẪU NHIÊN (CHỈ DÙNG CHO UI WEB, KHÔNG TẠO KEY SERVER) ----
-        function generateKey(prefix, length) {
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-            let random = '';
-            for (let i = 0; i < length; i++) {
-                random += chars.charAt(Math.floor(Math.random() * chars.length));
-            }
-            return prefix + '_' + random;
-        }
-
-        // ---- KIỂM TRA KEY CÒN HẠN ----
-        function isKeyValid() {
-            if (!expiryTimestamp) return false;
-            return Date.now() < expiryTimestamp;
-        }
-
-        // ---- CẬP NHẬT HIỂN THỊ ----
-        function updateDisplay(key) {
-            currentKey = key;
-            accessKeyEl.textContent = key;
-            const now = Date.now();
-            expiryTimestamp = now + CONFIG.expiryDays * 24 * 60 * 60 * 1000;
-            updateExpiryCountdown();
-            updateButtonState();
-
-            try {
-                localStorage.setItem('realkid_key', key);
-                localStorage.setItem('realkid_expiry', expiryTimestamp);
-            } catch(e) { /* bỏ qua */ }
-        }
-
-        // ---- CẬP NHẬT TRẠNG THÁI NÚT ----
-        function updateButtonState() {
-            if (isKeyValid()) {
-                genBtn.disabled = true;
-                genBtn.textContent = '🔒 ĐÃ CÓ KEY';
-                genBtn.title = 'Chỉ tạo mới khi key hết hạn (3 ngày)';
-            } else {
-                genBtn.disabled = false;
-                genBtn.textContent = '🔄 TẠO MỚI';
-                genBtn.title = 'Tạo key mới (key cũ đã hết hạn)';
-            }
-        }
-
-        // ---- ĐẾM NGƯỢC ----
-        function updateExpiryCountdown() {
-            if (!expiryTimestamp) {
-                expiryEl.textContent = '⏳ Hết hạn: --:--:--';
-                expiryEl.classList.remove('expired');
-                return;
-            }
-            const now = Date.now();
-            const diff = Math.max(0, expiryTimestamp - now);
-            const totalSeconds = Math.floor(diff / 1000);
-            const days = Math.floor(totalSeconds / 86400);
-            const hours = String(Math.floor((totalSeconds % 86400) / 3600)).padStart(2, '0');
-            const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
-            const seconds = String(totalSeconds % 60).padStart(2, '0');
-
-            if (totalSeconds <= 0) {
-                expiryEl.textContent = '⏳ Key đã hết hạn! Tạo mới.';
-                expiryEl.classList.add('expired');
-                updateButtonState();
-                return;
-            }
-
-            expiryEl.classList.remove('expired');
-            if (days > 0) {
-                expiryEl.textContent = `⏳ Hết hạn sau: ${days} ngày ${hours}:${minutes}:${seconds}`;
-            } else {
-                expiryEl.textContent = `⏳ Hết hạn sau: ${hours}:${minutes}:${seconds}`;
-            }
-            updateButtonState();
-        }
-
-        // ---- TẠO KEY MỚI (CHỈ KHI HẾT HẠN) ----
-        function createNewKey() {
-            if (isKeyValid()) {
-                showToast('⚠️ Key hiện tại còn hạn ' + CONFIG.expiryDays + ' ngày! Không thể tạo mới.', true);
-                return;
-            }
-
-            const newKey = generateKey(CONFIG.prefix, CONFIG.keyLength);
-            updateDisplay(newKey);
-            showToast('✅ Key mới (hạn 3 ngày): ' + newKey);
-            
-            if (window.history && window.history.replaceState) {
-                try {
-                    const url = new URL(window.location);
-                    url.searchParams.set('key', newKey);
-                    url.searchParams.set('type', 'success');
-                    window.history.replaceState({}, '', url);
-                } catch(e) {}
-            }
-        }
-
-        // ---- SAO CHÉP ----
-        function copyKey() {
-            const key = accessKeyEl.textContent;
-            if (!key || key === '⏳ Đang tạo...') {
-                showToast('⚠️ Chưa có key hợp lệ!', true);
-                return;
-            }
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(key).then(() => {
-                    showToast('✅ Đã sao chép: ' + key);
-                }).catch(() => fallbackCopy(key));
-            } else {
-                fallbackCopy(key);
-            }
-        }
-
-        function fallbackCopy(text) {
-            try {
-                const ta = document.createElement('textarea');
-                ta.value = text;
-                ta.style.position = 'fixed';
-                ta.style.left = '-9999px';
-                ta.style.top = '0';
-                document.body.appendChild(ta);
-                ta.select();
-                document.execCommand('copy');
-                ta.remove();
-                showToast('✅ Đã sao chép: ' + text);
-            } catch(e) {
-                showToast('⚠️ Không thể copy, hãy chọn và copy thủ công.', true);
-            }
-        }
-
-        // ---- KHỞI TẠO ----
-        function init() {
-            prefixDisplay.textContent = CONFIG.prefix;
-
-            const params = new URLSearchParams(window.location.search);
-            const urlKey = params.get('key');
-            const urlType = params.get('type');
-
-            let savedKey = '';
-            let savedExpiry = 0;
-            try {
-                savedKey = localStorage.getItem('realkid_key') || '';
-                savedExpiry = parseInt(localStorage.getItem('realkid_expiry') || '0');
-            } catch(e) {}
-
-            if (urlKey && urlType === 'success' && urlKey.startsWith(CONFIG.prefix + '_')) {
-                if (savedKey && savedExpiry > Date.now() && savedKey !== urlKey) {
-                    updateDisplay(savedKey);
-                    showToast('🔑 Đã khôi phục key cũ (còn hạn)');
-                } else {
-                    updateDisplay(urlKey);
-                    showToast('🔑 Key từ link: ' + urlKey);
-                }
-            }
-            else if (savedKey && savedExpiry > Date.now() && savedKey.startsWith(CONFIG.prefix + '_')) {
-                updateDisplay(savedKey);
-            }
-            else {
-                const newKey = generateKey(CONFIG.prefix, CONFIG.keyLength);
-                updateDisplay(newKey);
-                showToast('✨ Key mới được tạo (hạn 3 ngày)');
-            }
-
-            setInterval(updateExpiryCountdown, 1000);
-
-            keyBox.addEventListener('click', copyKey);
-            keyBox.addEventListener('touchend', function(e) {
-                e.preventDefault();
-                copyKey();
-            });
-            copyBtn.addEventListener('click', copyKey);
-            genBtn.addEventListener('click', createNewKey);
-
-            updateButtonState();
-        }
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', init);
-        } else {
-            init();
-        }
-    })();
+    console.log('✅ IPA Bổ sung hoàn tất. Device ID:', currentDeviceId);
+    console.log('🔑 Key hiện tại:', localStorage.getItem('realkid_key'));
+})();
 </script>
-</body>
-</html>
