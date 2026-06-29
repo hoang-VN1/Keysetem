@@ -538,7 +538,7 @@
                     updateDisplay(urlKey);
                     showToast('🔑 Key từ link: ' + urlKey);
                 } else {
-                    showToast('⚠️ Key không hợp lệ cho thiết bị này!', true);
+                    showToast('⚠️ Key không hợp lệ cho thiết bị này!', false);
                 }
             }
             else if (savedKey && savedExpiry > Date.now() && savedDevice === deviceId && isValidKey(savedKey)) {
