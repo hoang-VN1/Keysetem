@@ -1,3 +1,109 @@
+<?php
+// ===== XỬ LÝ KEY PHÍA SERVER =====
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
+
+$keyFile = 'keys.json';
+$keys = [];
+
+// Đọc dữ liệu key hiện có
+if (file_exists($keyFile)) {
+    $content = file_get_contents($keyFile);
+    $keys = json_decode($content, true) ?: [];
+}
+
+// Xóa key hết hạn (TỰ ĐỘNG XÓA KHI HẾT 3 NGÀY)
+$now = time();
+foreach ($keys as $k => $data) {
+    if ($data['expiry'] < $now) {
+        unset($keys[$k]);
+    }
+}
+
+// Lấy action từ request
+$action = $_GET['action'] ?? '';
+
+if ($action === 'get_key') {
+    // Tạo key mới (hạn 3 ngày) - CHỈ TẠO KHI BẤM GET KEY TỪ SCRIPT
+    $deviceId = $_GET['device_id'] ?? '';
+    if (empty($deviceId)) {
+        echo json_encode(['status' => 'error', 'message' => 'Thiếu device_id']);
+        exit;
+    }
+
+    // Kiểm tra xem device đã có key chưa (chỉ được 1 key/device)
+    $existingKey = null;
+    foreach ($keys as $k => $data) {
+        if ($data['device_id'] === $deviceId && $data['expiry'] > $now) {
+            $existingKey = $k;
+            break;
+        }
+    }
+    if ($existingKey) {
+        echo json_encode([
+            'status' => 'success',
+            'key' => $existingKey,
+            'expiry' => $keys[$existingKey]['expiry'],
+            'device_id' => $deviceId,
+            'message' => 'Key đã tồn tại cho thiết bị này'
+        ]);
+        exit;
+    }
+
+    // Tạo key mới (chỉ khi chưa có key hoặc key đã hết hạn)
+    $newKey = 'HOANG_' . strtoupper(bin2hex(random_bytes(4)));
+    $keys[$newKey] = [
+        'device_id' => $deviceId,
+        'expiry' => $now + (3 * 24 * 60 * 60), // 3 ngày
+        'created' => $now
+    ];
+
+    file_put_contents($keyFile, json_encode($keys, JSON_PRETTY_PRINT));
+
+    echo json_encode([
+        'status' => 'success',
+        'key' => $newKey,
+        'expiry' => $keys[$newKey]['expiry'],
+        'device_id' => $deviceId,
+        'message' => 'Key mới được tạo'
+    ]);
+    exit;
+}
+
+if ($action === 'verify_key') {
+    // Xác thực key
+    $key = $_GET['key'] ?? '';
+    $deviceId = $_GET['device_id'] ?? '';
+    if (empty($key) || empty($deviceId)) {
+        echo json_encode(['status' => 'error', 'message' => 'Thiếu key hoặc device_id']);
+        exit;
+    }
+
+    if (!isset($keys[$key])) {
+        echo json_encode(['status' => 'error', 'message' => 'Key không tồn tại']);
+        exit;
+    }
+
+    $data = $keys[$key];
+    if ($data['expiry'] < $now) {
+        unset($keys[$key]);
+        file_put_contents($keyFile, json_encode($keys, JSON_PRETTY_PRINT));
+        echo json_encode(['status' => 'error', 'message' => 'Key đã hết hạn']);
+        exit;
+    }
+
+    if ($data['device_id'] !== $deviceId) {
+        // WEB CHỈ TRẢ VỀ LỖI, KHÔNG KICK
+        echo json_encode(['status' => 'error', 'message' => 'Key không thuộc về thiết bị này', 'device_mismatch' => true]);
+        exit;
+    }
+
+    echo json_encode(['status' => 'success', 'message' => 'Key hợp lệ', 'expiry' => $data['expiry']]);
+    exit;
+}
+
+// Nếu không có action, hiển thị giao diện web (GIỮ NGUYÊN UI GỐC)
+?>
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -259,7 +365,7 @@
     </div>
 
     <div class="gen-info">
-        ⚡ Prefix: <span id="prefixDisplay">TRAU</span> · Thời hạn: <strong>3 ngày</strong> · Chỉ tạo mới khi key hết hạn
+        ⚡ Prefix: <span id="prefixDisplay">HOANG</span> · Thời hạn: <strong>3 ngày</strong> · Chỉ tạo mới khi key hết hạn
     </div>
 </div>
 
@@ -301,7 +407,7 @@
             }, 3000);
         }
 
-        // ---- TẠO KEY NGẪU NHIÊN ----
+        // ---- TẠO KEY NGẪU NHIÊN (CHỈ DÙNG CHO UI WEB, KHÔNG TẠO KEY SERVER) ----
         function generateKey(prefix, length) {
             const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
             let random = '';
@@ -373,13 +479,11 @@
             } else {
                 expiryEl.textContent = `⏳ Hết hạn sau: ${hours}:${minutes}:${seconds}`;
             }
-            // Cập nhật trạng thái nút mỗi giây (phòng trường hợp hết hạn)
             updateButtonState();
         }
 
         // ---- TẠO KEY MỚI (CHỈ KHI HẾT HẠN) ----
         function createNewKey() {
-            // Kiểm tra chặt chẽ: nếu còn hạn thì không cho tạo
             if (isKeyValid()) {
                 showToast('⚠️ Key hiện tại còn hạn ' + CONFIG.expiryDays + ' ngày! Không thể tạo mới.', true);
                 return;
@@ -402,7 +506,7 @@
         // ---- SAO CHÉP ----
         function copyKey() {
             const key = accessKeyEl.textContent;
-            if (!key || key === '⏳ Đang tạo...' || key === 'TRAU_QMCH3ILH') {
+            if (!key || key === '⏳ Đang tạo...') {
                 showToast('⚠️ Chưa có key hợp lệ!', true);
                 return;
             }
@@ -447,37 +551,26 @@
                 savedExpiry = parseInt(localStorage.getItem('realkid_expiry') || '0');
             } catch(e) {}
 
-            // Ưu tiên URL key (chỉ dùng nếu chưa hết hạn)
             if (urlKey && urlType === 'success' && urlKey.startsWith(CONFIG.prefix + '_')) {
-                // Kiểm tra xem key từ URL có hạn không (tính từ thời điểm hiện tại)
-                // Ta giả định key từ URL là mới, nhưng vẫn tôn trọng hạn 3 ngày
-                const tempExpiry = Date.now() + CONFIG.expiryDays * 24 * 60 * 60 * 1000;
-                // Nếu key lưu cũ vẫn còn hạn và khác với key URL, ưu tiên key cũ (giữ nguyên)
                 if (savedKey && savedExpiry > Date.now() && savedKey !== urlKey) {
-                    // Giữ key cũ
                     updateDisplay(savedKey);
                     showToast('🔑 Đã khôi phục key cũ (còn hạn)');
                 } else {
-                    // Dùng key từ URL
                     updateDisplay(urlKey);
                     showToast('🔑 Key từ link: ' + urlKey);
                 }
             }
-            // Dùng key lưu nếu còn hạn
             else if (savedKey && savedExpiry > Date.now() && savedKey.startsWith(CONFIG.prefix + '_')) {
                 updateDisplay(savedKey);
             }
-            // Tạo mới (chỉ khi không có key hợp lệ)
             else {
                 const newKey = generateKey(CONFIG.prefix, CONFIG.keyLength);
                 updateDisplay(newKey);
                 showToast('✨ Key mới được tạo (hạn 3 ngày)');
             }
 
-            // Cập nhật đồng hồ mỗi giây
             setInterval(updateExpiryCountdown, 1000);
 
-            // Sự kiện (hỗ trợ touch và click)
             keyBox.addEventListener('click', copyKey);
             keyBox.addEventListener('touchend', function(e) {
                 e.preventDefault();
@@ -486,7 +579,6 @@
             copyBtn.addEventListener('click', copyKey);
             genBtn.addEventListener('click', createNewKey);
 
-            // Cập nhật trạng thái nút lần đầu
             updateButtonState();
         }
 
