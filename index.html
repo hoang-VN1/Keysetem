@@ -230,6 +230,11 @@
             margin-top: 8px;
             opacity: 0.6;
             word-break: break-all;
+            background: rgba(0,0,0,0.3);
+            padding: 4px 10px;
+            border-radius: 8px;
+            display: inline-block;
+            font-family: 'Courier New', monospace;
         }
         @media (max-width: 420px) {
             .card { padding: 22px 14px; }
@@ -267,8 +272,9 @@
 
     <div class="gen-info">
         ⚡ Prefix: <span id="prefixDisplay">HOANG</span> · Thời hạn: <strong>3 ngày</strong> · Chỉ tạo mới khi key hết hạn
+        <br>
+        <span class="device-id" id="deviceIdDisplay">🔒 Device ID: Đang tạo...</span>
     </div>
-    <div class="device-id" id="deviceIdDisplay">🔒 Device ID: Đang tạo...</div>
 </div>
 
 <div id="toast" class="toast">✅ Đã sao chép!</div>
@@ -294,48 +300,49 @@
 
         // ---- TẠO DEVICE ID DUY NHẤT ----
         function generateDeviceId() {
-            // Tạo device ID dựa trên nhiều yếu tố
             const screen = window.screen;
             const navigator = window.navigator;
             
             const components = [
-                screen.width,
-                screen.height,
-                screen.colorDepth,
-                navigator.userAgent,
-                navigator.language,
-                navigator.platform,
-                new Date().getTimezoneOffset(),
-                // Thêm các yếu tố khác để tăng tính duy nhất
-                performance.now(),
-                Math.random()
+                screen.width || 0,
+                screen.height || 0,
+                screen.colorDepth || 0,
+                navigator.userAgent || '',
+                navigator.language || '',
+                navigator.platform || '',
+                new Date().getTimezoneOffset() || 0,
+                window.innerWidth || 0,
+                window.innerHeight || 0,
+                navigator.hardwareConcurrency || 0,
+                navigator.deviceMemory || 0,
+                performance.now() || 0,
+                Math.random() || 0
             ];
             
-            // Tạo hash từ các components
             let hash = 0;
             const str = components.join('|');
             for (let i = 0; i < str.length; i++) {
                 const char = str.charCodeAt(i);
                 hash = ((hash << 5) - hash) + char;
-                hash = hash & hash; // Convert to 32bit integer
+                hash = hash & hash;
             }
             
-            // Tạo ID dạng HEX
             const deviceId = 'DEV_' + Math.abs(hash).toString(16).toUpperCase().padStart(8, '0');
             return deviceId;
         }
 
-        // ---- LƯU DEVICE ID ----
+        // ---- LẤY HOẶC TẠO DEVICE ID ----
         let deviceId = '';
         try {
             deviceId = localStorage.getItem('device_id');
-            if (!deviceId) {
+            if (!deviceId || deviceId === 'null' || deviceId === 'undefined') {
                 deviceId = generateDeviceId();
                 localStorage.setItem('device_id', deviceId);
             }
         } catch(e) {
             deviceId = generateDeviceId();
         }
+        
         deviceIdDisplay.textContent = '🔒 Device ID: ' + deviceId;
 
         // ---- TẠO KEY VỚI DEVICE ID ----
@@ -345,7 +352,6 @@
             for (let i = 0; i < length; i++) {
                 random += chars.charAt(Math.floor(Math.random() * chars.length));
             }
-            // Key format: PREFIX_RANDOM_DEVICEID
             return prefix + '_' + random + '_' + deviceId;
         }
 
@@ -366,11 +372,15 @@
         // ---- KIỂM TRA KEY HỢP LỆ ----
         function isValidKey(key) {
             if (!key) return false;
-            // Key phải có format: PREFIX_RANDOM_DEVICEID
             const parts = key.split('_');
             if (parts.length !== 3) return false;
             if (parts[0] !== CONFIG.prefix) return false;
-            if (parts[2] !== deviceId) return false;
+            if (parts[2] !== deviceId) {
+                console.log('❌ Device ID không khớp!');
+                console.log('Device ID của key:', parts[2]);
+                console.log('Device ID của bạn:', deviceId);
+                return false;
+            }
             return true;
         }
 
@@ -474,7 +484,6 @@
                 return;
             }
             
-            // Kiểm tra key có khớp với device không
             if (!isValidKey(key)) {
                 showToast('⚠️ Key không khớp với thiết bị này!', true);
                 return;
@@ -524,7 +533,6 @@
                 savedDevice = localStorage.getItem('realkid_device') || '';
             } catch(e) {}
 
-            // Kiểm tra key từ URL
             if (urlKey && urlType === 'success' && urlDevice === deviceId) {
                 if (isValidKey(urlKey)) {
                     updateDisplay(urlKey);
@@ -533,12 +541,10 @@
                     showToast('⚠️ Key không hợp lệ cho thiết bị này!', true);
                 }
             }
-            // Kiểm tra key đã lưu
             else if (savedKey && savedExpiry > Date.now() && savedDevice === deviceId && isValidKey(savedKey)) {
                 updateDisplay(savedKey);
                 showToast('🔑 Đã khôi phục key cũ (còn hạn)');
             }
-            // Tạo key mới
             else {
                 const newKey = generateKeyWithDevice(CONFIG.prefix, CONFIG.keyLength, deviceId);
                 updateDisplay(newKey);
@@ -559,7 +565,7 @@
         }
 
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', init);
+            document.addEventListener('DOMContentLoaded',init);
         } else {
             init();
         }
